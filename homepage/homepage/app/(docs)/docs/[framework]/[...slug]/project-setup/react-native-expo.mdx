@@ -4,7 +4,7 @@ import { CodeGroup } from "@/components/forMdx";
 
 # React Native (Expo) Installation and Setup
 
-Jazz supports Expo through the dedicated `jazz-expo` package, which is specifically designed for Expo applications.
+Jazz supports Expo through the dedicated `jazz-expo` package, which is specifically designed for Expo applications. If you're building for React Native without Expo, please refer to the [React Native](/docs/react-native/project-setup) guide instead.
 
 Jazz requires an [Expo development build](https://docs.expo.dev/develop/development-builds/introduction/) using [Expo Prebuild](https://docs.expo.dev/workflow/prebuild/) for native code. It is **not compatible** with Expo Go. Jazz also supports the [New Architecture](https://docs.expo.dev/guides/new-architecture/).
 
@@ -25,11 +25,11 @@ Tested with:
 (Skip this step if you already have one)
 
 <CodeGroup>
-  ```bash
+```bash
 npx create-expo-app -e with-router-tailwind my-jazz-app
 cd my-jazz-app
 npx expo prebuild
-  ```
+```
 </CodeGroup>
 
 ### Install dependencies
@@ -61,7 +61,7 @@ npx expo install --fix
 
 ### Install CocoaPods
 
-If you're compiling for iOS, you'll need to install CocoaPods for your project. Expo recommend using the [`pod-install` command](https://docs.expo.dev/bare/installing-updates/#installation):
+If you're compiling for iOS, you'll need to install CocoaPods for your project. We recommend using [`pod-install`](https://www.npmjs.com/package/pod-install):
 
 <CodeGroup>
 ```bash 
@@ -90,7 +90,7 @@ module.exports = config;
 
 #### Monorepos
 
-For monorepos, use the following metro.config.js:
+For monorepos, use the following `metro.config.js`:
 
 <CodeGroup>
 ```ts
@@ -122,7 +122,7 @@ module.exports = config;
 ```
 </CodeGroup>
 
-### Additional monorepo configuration (for pnpm users)
+### Additional monorepo configuration (for pnpm)
 
 If you're using `pnpm`, you'll need to make sure that your expo app's `package.json` has this:
 
@@ -130,12 +130,13 @@ If you're using `pnpm`, you'll need to make sure that your expo app's `package.j
 ```json
 // package.json
 {
-  ...,
   "main": "index.js",
   ...
 }
 ```
 </CodeGroup>
+
+For more information, refer to [this Expo monorepo example](https://github.com/byCedric/expo-monorepo-example#pnpm-workarounds).
 
 ## Setting up the provider
 

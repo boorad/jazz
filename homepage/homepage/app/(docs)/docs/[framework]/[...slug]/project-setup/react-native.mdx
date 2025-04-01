@@ -2,46 +2,54 @@ export const metadata = { title: "React Native" };
 
 import { CodeGroup } from "@/components/forMdx";
 
-# React Native
+# React Native Installation and Setup
 
-This guide covers setting up Jazz with framework-less React Native applications (without Expo). If you're using Expo, please refer to the [React Native - Expo](/docs/react-native-expo/project-setup) guide instead.
+This guide covers setting up Jazz for React Native applications. If you're using Expo, please refer to the [React Native - Expo](/docs/react-native-expo/project-setup) guide instead.
 
 Jazz supports the [New Architecture](https://reactnative.dev/architecture/landing-page) for React Native.
 
 Tested with:
 
 <CodeGroup>
-  ```json "react-native": "0.76.7", "react": "18.3.1" ```
+```json 
+"react-native": "0.76.7",
+"react": "18.3.1" 
+```
 </CodeGroup>
 
 ## Setup
 
 ### Create a new project
 
-(skip this step if you already have one)
+(Skip this step if you already have one)
 
 <CodeGroup>
-  ```bash
-  npx react-native init MyJazzApp
-  cd MyJazzApp
-  ```
+```bash
+npx react-native init my-jazz-app
+cd my-jazz-app
+```
 </CodeGroup>
 
 ### Install dependencies
 
 <CodeGroup>
-  ```bash
-  npm install @react-native-community/netinfo @bam.tech/react-native-image-resizer
+```bash
+# React Native dependencies
+npm install @react-native-community/netinfo @bam.tech/react-native-image-resizer
 
-  npm i -S @azure/core-asynciterator-polyfill react-native-url-polyfill readable-stream react-native-get-random-values @craftzdog/react-native-buffer @op-engineering/op-sqlite react-native-mmkv
+# React Native polyfills
+npm i -S @azure/core-asynciterator-polyfill react-native-url-polyfill readable-stream react-native-get-random-values @craftzdog/react-native-buffer @op-engineering/op-sqlite react-native-mmkv
 
-  npm i -S jazz-tools jazz-react-native jazz-react-native-media-images
-  ```
+# Jazz dependencies
+npm i -S jazz-tools jazz-react-native jazz-react-native-media-images
+```
 </CodeGroup>
 
-> note: Hermes has added support for `atob` and `btoa` in React Native 0.74. If you are using earlier versions, you may also need to polyfill `atob` and `btoa` in your `package.json`. Packages to try include `text-encoding` and `base-64`, and you can drop `@bacons/text-decoder`.
+**Note**: Hermes has added support for `atob` and `btoa` in React Native 0.74. If you are using earlier versions, you may also need to polyfill `atob` and `btoa` in your `package.json`. Packages to try include `text-encoding` and `base-64`, and you can drop `@bacons/text-decoder`.
 
-### Install Pods
+### Install CocoaPods
+
+If you're compiling for iOS, you'll need to install CocoaPods for your project. We recommend using [`pod-install`](https://www.npmjs.com/package/pod-install):
 
 <CodeGroup>
 ```bash
@@ -53,56 +61,63 @@ npx pod-install
 
 #### Regular repositories
 
-If you are not working within a monorepo, create a new file metro.config.js in the root of your project with the following content:
+If you are not working within a monorepo, create a new file `metro.config.js` in the root of your project with the following content:
 
 <CodeGroup>
-  ```ts const {getDefaultConfig} = require("expo/metro-config"); const config =
-  getDefaultConfig(projectRoot); config.resolver.sourceExts = ["mjs", "js",
-  "json", "ts", "tsx"]; config.resolver.requireCycleIgnorePatterns =
-  [/(^|\/|\\)node_modules($|\/|\\)/]; module.exports = config; ```
+```ts
+// metro.config.js
+const { getDefaultConfig } = require("expo/metro-config");
+const config = getDefaultConfig(projectRoot);
+
+config.resolver.sourceExts = ["mjs", "js", "json", "ts", "tsx"];
+config.resolver.requireCycleIgnorePatterns = [/(^|\/|\\)node_modules($|\/|\\)/];
+
+module.exports = config;
+```
 </CodeGroup>
 
 #### Monorepos
 
-For monorepos, use the following metro.config.js:
+For monorepos, use the following `metro.config.js`:
 
 <CodeGroup>
-  ```ts
-  const { getDefaultConfig } = require("expo/metro-config");
-  const { FileStore } = require("metro-cache");
-  const path = require("path");
+```ts
+// metro.config.js
+const { getDefaultConfig } = require("expo/metro-config");
+const { FileStore } = require("metro-cache");
+const path = require("path");
 
 // eslint-disable-next-line no-undef
-const projectRoot = \_\_dirname;
+const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, "../..");
 
 const config = getDefaultConfig(projectRoot);
 
 config.watchFolders = [workspaceRoot];
 config.resolver.nodeModulesPaths = [
-path.resolve(projectRoot, "node_modules"),
-path.resolve(workspaceRoot, "node_modules"),
+  path.resolve(projectRoot, "node_modules"),
+  path.resolve(workspaceRoot, "node_modules"),
 ];
 config.resolver.sourceExts = ["mjs", "js", "json", "ts", "tsx"];
 config.resolver.requireCycleIgnorePatterns = [/(^|\/|\\)node_modules($|\/|\\)/];
 config.cacheStores = [
-new FileStore({
-root: path.join(projectRoot, "node_modules", ".cache", "metro"),
-}),
+  new FileStore({
+    root: path.join(projectRoot, "node_modules", ".cache", "metro"),
+  }),
 ];
 
 module.exports = config;
-
-````
+```
 </CodeGroup>
 
-### Additional monorepo configuration (for pnpm users)
+### Additional monorepo configuration (for pnpm)
 
-- Add node-linker=hoisted to the root .npmrc (create this file if it doesn’t exist).
-- Add the following to the root package.json:
+- Add `node-linker=hoisted` to the root `.npmrc` (create this file if it doesn't exist).
+- Add the following to the root `package.json`:
 
 <CodeGroup>
 ```json
+// package.json
 "pnpm": {
   "peerDependencyRules": {
     "ignoreMissing": [
@@ -112,78 +127,91 @@ module.exports = config;
     ]
   }
 }
-````
-
+```
 </CodeGroup>
-
-For more information, refer to [this](https://github.com/byCedric/expo-monorepo-example#pnpm-workarounds) Expo monorepo example.
 
 ### Add polyfills
 
 Create a file `polyfills.js` at the project root with the following content:
 
 <CodeGroup>
-  ```js
+```js
+// polyfills.js
 import { polyfillGlobal } from 'react-native/Libraries/Utilities/PolyfillFunctions';
-
 import { Buffer } from "@craftzdog/react-native-buffer";
-polyfillGlobal("Buffer", () => Buffer);
+polyfillGlobal("Buffer", () => Buffer); // polyfill Buffer
 
 import { ReadableStream } from "readable-stream";
-polyfillGlobal("ReadableStream", () => ReadableStream);
+polyfillGlobal("ReadableStream", () => ReadableStream); // polyfill ReadableStream
 
-import "@azure/core-asynciterator-polyfill";
-
-import "@bacons/text-decoder/install";
-
-import 'react-native-get-random-values';
+import "@azure/core-asynciterator-polyfill"; // polyfill Async Iterator
+import "@bacons/text-decoder/install"; // polyfill Text Decoder
+import 'react-native-get-random-values'; // polyfill getRandomValues
 ```
 </CodeGroup>
 
 Update `index.js` based on whether you are using expo-router or not:
 
-#### If using `expo-router`
+#### With `expo-router`
 
 <CodeGroup>
-  ```ts import "./polyfills"; import "expo-router/entry"; ```
+```ts
+// index.js
+import "./polyfills";
+import "expo-router/entry";
+```
 </CodeGroup>
 
 #### Without `expo-router`
 
 <CodeGroup>
-  ```ts import "./polyfills"; import {registerRootComponent} from "expo"; import
-  App from "./src/App"; registerRootComponent(App); ```
+```ts
+// index.js
+import "./polyfills";
+import { registerRootComponent } from "expo";
+import App from "./src/App";
+registerRootComponent(App);
+```
 </CodeGroup>
 
 Lastly, ensure that the `"main"` field in your `package.json` points to `index.js`:
 
-<CodeGroup>```json "main": "index.js", ```</CodeGroup>
+<CodeGroup>
+```json
+// package.json
+{
+  "main": "index.js",
+  ...
+}
+```
+</CodeGroup>
 
 ## Setting up the provider
 
-Wrap your app components with the JazzProvider:
+Wrap your app components with the `<JazzProvider />` component:
 
 <CodeGroup>
 ```tsx
+// App.tsx
 import { JazzProvider } from "jazz-react-native";
 import { MyAppAccount } from "./schema";
 
 export function MyJazzProvider({ children }: { children: React.ReactNode }) {
-    return (
-        <JazzProvider
-            sync={{ peer: "wss://cloud.jazz.tools/?key=you@example.com" }}
-            AccountSchema={MyAppAccount}
-        >
-            {children}
-        </JazzProvider>
-    );
+  return (
+    <JazzProvider
+      sync={{ peer: "wss://cloud.jazz.tools/?key=you@example.com" }}
+      AccountSchema={MyAppAccount}
+    >
+      {children}
+    </JazzProvider>
+  );
 }
 
 // Register the Account schema so `useAccount` returns our custom `MyAppAccount`
 declare module "jazz-react-native" {
-    interface Register {
-        Account: MyAppAccount;
-    }
+  interface Register {
+    Account: MyAppAccount;
+  }
 }
 ```
 </CodeGroup>
@@ -195,12 +223,12 @@ declare module "jazz-react-native" {
 - `AccountSchema`
   - `Account` (default)
 - `CryptoProvider`
-  - `PureJSCrypto` (default)
+  - `PureJSCrypto` (default) - Pure JavaScript crypto provider
   - `RNQuickCrypto` - C++ accelerated crypto provider
 
 ### Local Persistence
 
-Jazz for React Native includes built-in local persistence using SQLite. The framework-less React Native implementation uses:
+Jazz for React Native includes built-in local persistence using SQLite. This implementation uses:
 
 - **Database Storage**: `@op-engineering/op-sqlite` - A high-performance SQLite implementation
 - **Key-Value Storage**: `react-native-mmkv` - A fast key-value storage system
@@ -213,7 +241,12 @@ You can customize the storage options in the `JazzProvider`:
 
 <CodeGroup>
 ```tsx
-import { JazzProvider, OpSQLiteAdapter, MMKVStoreAdapter } from "jazz-react-native";
+// App.tsx 
+import {
+  JazzProvider,
+  OpSQLiteAdapter,
+  MMKVStoreAdapter,
+} from "jazz-react-native";
 
 // Default configuration - no parameters needed
 <JazzProvider
@@ -261,37 +294,35 @@ Jazz provides a complete solution for handling images in React Native, including
 To upload images, use the `createImage` function from `jazz-react-native-media-images`. This function handles image processing and creates an `ImageDefinition` that can be stored in your Jazz covalues:
 
 <CodeGroup>
-  ```tsx
-  import { createImage } from "jazz-react-native-media-images";
-  import * as ImagePicker from 'expo-image-picker';
+```tsx
+import { createImage } from "jazz-react-native-media-images";
+import * as ImagePicker from 'expo-image-picker';
 
 // Example: Image upload from device library
 const handleImageUpload = async () => {
-try {
-const result = await ImagePicker.launchImageLibraryAsync({
-mediaTypes: ImagePicker.MediaTypeOptions.Images,
-base64: true, // Important: We need base64 data
-quality: 0.7,
-});
+  try {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      base64: true, // Important: We need base64 data
+      quality: 0.7,
+    });
 
-      if (!result.canceled && result.assets[0].base64) {
-        const base64Uri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+    if (!result.canceled && result.assets[0].base64) {
+      const base64Uri = `data:image/jpeg;base64,${result.assets[0].base64}`;
 
-        const image = await createImage(base64Uri, {
-          owner: someCovalue._owner,  // Set appropriate owner
-          maxSize: 2048,  // Optional: limit maximum image size
-        });
+      const image = await createImage(base64Uri, {
+        owner: someCovalue._owner,  // Set appropriate owner
+        maxSize: 2048,  // Optional: limit maximum image size
+      });
 
-        // Store the image in your covalue
-        someCovalue.image = image;
-      }
-    } catch (error) {
-      console.error('Failed to upload image:', error);
+      // Store the image in your covalue
+      someCovalue.image = image;
     }
-
+  } catch (error) {
+    console.error('Failed to upload image:', error);
+  }
 };
-
-````
+```
 </CodeGroup>
 
 #### Displaying Images
@@ -303,21 +334,21 @@ To display images, use the `ProgressiveImg` component from `jazz-react-native`. 
 import { ProgressiveImg } from "jazz-react-native";
 import { Image } from "react-native";
 
-  // Inside your render function:
-  <ProgressiveImg image={someCovalue.image} targetWidth={1024}>
-    {({ src, res, originalSize }) => (
-      <Image
-        source={{ uri: src }}
-        style={{
-          width: 300,  // Adjust size as needed
-          height: 300,
-          borderRadius: 8,
-        }}
-        resizeMode="cover"
-      />
-    )}
-  </ProgressiveImg>
-  ```
+// Inside your render function:
+<ProgressiveImg image={someCovalue.image} targetWidth={1024}>
+  {({ src, res, originalSize }) => (
+    <Image
+      source={{ uri: src }}
+      style={{
+        width: 300,  // Adjust size as needed
+        height: 300,
+        borderRadius: 8,
+      }}
+      resizeMode="cover"
+    />
+  )}
+</ProgressiveImg>
+```
 </CodeGroup>
 
 The `ProgressiveImg` component:
@@ -331,4 +362,9 @@ For a complete implementation example, see the [Chat Example](https://github.com
 
 ### Running your app
 
-<CodeGroup>```bash npx expo run:ios npx expo run:android ```</CodeGroup>
+<CodeGroup>
+```sh
+npx expo run:ios
+npx expo run:android
+```
+</CodeGroup>
