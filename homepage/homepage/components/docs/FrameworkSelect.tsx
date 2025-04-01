@@ -29,7 +29,7 @@ const frameworks: Record<
     experimental: false,
   },
   [Framework.ReactNativeExpo]: {
-    label: "React Native Expo",
+    label: "React Native (Expo)",
     experimental: false,
   },
   [Framework.Vanilla]: {
