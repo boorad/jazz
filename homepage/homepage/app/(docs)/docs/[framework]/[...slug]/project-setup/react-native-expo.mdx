@@ -1,8 +1,8 @@
-export const metadata = { title: "React Native - Expo" };
+export const metadata = { title: "React Native (Expo)" };
 
 import { CodeGroup } from "@/components/forMdx";
 
-# React Native - Expo
+# React Native (Expo) Installation and Setup
 
 Jazz supports Expo through the dedicated `jazz-expo` package, which is specifically designed for Expo applications.
 
@@ -11,42 +11,47 @@ Jazz requires an [Expo development build](https://docs.expo.dev/develop/developm
 Tested with:
 
 <CodeGroup>
-  ```json 
-  "expo": "~52.0.0", 
-  "react-native": "0.76.7", 
-  "react": "18.3.1"
-  ```
+```json 
+"expo": "~52.0.0", 
+"react-native": "0.76.7", 
+"react": "18.3.1"
+```
 </CodeGroup>
 
 ## Setup
 
 ### Create a new project
 
-(skip this step if you already have one)
+(Skip this step if you already have one)
 
 <CodeGroup>
   ```bash
-  npx create-expo-app -e with-router-tailwind my-jazz-app
-  cd my-jazz-app
-  npx expo prebuild
+npx create-expo-app -e with-router-tailwind my-jazz-app
+cd my-jazz-app
+npx expo prebuild
   ```
 </CodeGroup>
 
 ### Install dependencies
 
 <CodeGroup>
-  ```bash
-  npx expo install expo-linking expo-secure-store expo-file-system @react-native-community/netinfo @bam.tech/react-native-image-resizer
+```bash
+# Expo dependencies
+npx expo install expo-linking expo-secure-store expo-file-system @react-native-community/netinfo @bam.tech/react-native-image-resizer
 
-  npm i -S @azure/core-asynciterator-polyfill react-native-url-polyfill readable-stream react-native-get-random-values @craftzdog/react-native-buffer
+# React Native polyfills
+npm i -S @azure/core-asynciterator-polyfill react-native-url-polyfill readable-stream react-native-get-random-values @craftzdog/react-native-buffer
 
-  npm i -S jazz-tools jazz-expo jazz-react-native-media-images
-  ```
+# Jazz dependencies
+npm i -S jazz-tools jazz-expo jazz-react-native-media-images
+```
 </CodeGroup>
 
-> note: Hermes has added support for `atob` and `btoa` in React Native 0.74. If you are using earlier versions, you may also need to polyfill `atob` and `btoa` in your `package.json`. Packages to try include `text-encoding` and `base-64`, and you can drop `@bacons/text-decoder`.
+**Note**: Hermes has added support for `atob` and `btoa` in React Native 0.74. If you are using earlier versions, you may also need to polyfill `atob` and `btoa` in your `package.json`. Packages to try include: `text-encoding`, `base-64`, and you can drop `@bacons/text-decoder`.
 
-### Fix incompatible dependencies
+#### Fix incompatible dependencies
+
+If you encounter incompatible dependencies, you can try to fix them with the following command:
 
 <CodeGroup>
 ```bash
@@ -54,7 +59,9 @@ npx expo install --fix
 ```
 </CodeGroup>
 
-### Install Pods
+### Install CocoaPods
+
+If you're compiling for iOS, you'll need to install CocoaPods for your project. Expo recommend using the [`pod-install` command](https://docs.expo.dev/bare/installing-updates/#installation):
 
 <CodeGroup>
 ```bash 
@@ -66,16 +73,19 @@ npx pod-install
 
 #### Regular repositories
 
-If you are not working within a monorepo, create a new file metro.config.js in the root of your project with the following content:
+If you are not working within a monorepo, create a new file `metro.config.js` in the root of your project with the following content:
 
 <CodeGroup>
-  ```ts 
-  const {getDefaultConfig} = require("expo/metro-config"); 
-  const config = getDefaultConfig(projectRoot); 
-  config.resolver.sourceExts = ["mjs", "js", "json", "ts", "tsx"]; 
-  config.resolver.requireCycleIgnorePatterns = [/(^|\/|\\)node_modules($|\/|\\)/]; 
-  module.exports = config; 
-  ```
+```ts 
+// metro.config.js
+const { getDefaultConfig } = require("expo/metro-config"); 
+const config = getDefaultConfig(projectRoot); 
+  
+config.resolver.sourceExts = ["mjs", "js", "json", "ts", "tsx"]; 
+config.resolver.requireCycleIgnorePatterns = [/(^|\/|\\)node_modules($|\/|\\)/]; 
+  
+module.exports = config; 
+```
 </CodeGroup>
 
 #### Monorepos
@@ -83,65 +93,76 @@ If you are not working within a monorepo, create a new file metro.config.js in t
 For monorepos, use the following metro.config.js:
 
 <CodeGroup>
-  ```ts
-  const { getDefaultConfig } = require("expo/metro-config");
-  const { FileStore } = require("metro-cache");
-  const path = require("path");
+```ts
+// metro.config.js
+const { getDefaultConfig } = require("expo/metro-config");
+const { FileStore } = require("metro-cache");
+const path = require("path");
 
-  // eslint-disable-next-line no-undef
-  const projectRoot = __dirname;
-  const workspaceRoot = path.resolve(projectRoot, "../..");
+// eslint-disable-next-line no-undef
+const projectRoot = __dirname;
+const workspaceRoot = path.resolve(projectRoot, "../..");
 
-  const config = getDefaultConfig(projectRoot);
+const config = getDefaultConfig(projectRoot);
 
-  config.watchFolders = [workspaceRoot];
-  config.resolver.nodeModulesPaths = [
-    path.resolve(projectRoot, "node_modules"),
-    path.resolve(workspaceRoot, "node_modules"),
-  ];
-  config.resolver.sourceExts = ["mjs", "js", "json", "ts", "tsx"];
-  config.resolver.requireCycleIgnorePatterns = [/(^|\/|\\)node_modules($|\/|\\)/];
-  config.cacheStores = [
-    new FileStore({
-      root: path.join(projectRoot, "node_modules", ".cache", "metro"),
-    }),
-  ];
+config.watchFolders = [workspaceRoot];
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, "node_modules"),
+  path.resolve(workspaceRoot, "node_modules"),
+];
+config.resolver.sourceExts = ["mjs", "js", "json", "ts", "tsx"];
+config.resolver.requireCycleIgnorePatterns = [/(^|\/|\\)node_modules($|\/|\\)/];
+config.cacheStores = [
+  new FileStore({
+    root: path.join(projectRoot, "node_modules", ".cache", "metro"),
+  }),
+];
 
-  module.exports = config;
-  ```
+module.exports = config;
+```
 </CodeGroup>
 
 ### Additional monorepo configuration (for pnpm users)
 
-If you're using pnpm, you'll need to make sure that your expo app's package.json has this:
+If you're using `pnpm`, you'll need to make sure that your expo app's `package.json` has this:
 
-<CodeGroup>```json "main": "index.js", ```</CodeGroup>
+<CodeGroup>
+```json
+// package.json
+{
+  ...,
+  "main": "index.js",
+  ...
+}
+```
+</CodeGroup>
 
 ## Setting up the provider
 
-Wrap your app components with the JazzProvider:
+Wrap your app components with the `<JazzProvider />` component:
 
 <CodeGroup>
 ```tsx
+// App.tsx
 import { JazzProvider } from "jazz-expo";
 import { MyAppAccount } from "./schema";
 
 export function MyJazzProvider({ children }: { children: React.ReactNode }) {
-    return (
-        <JazzProvider
-            sync={{ peer: "wss://cloud.jazz.tools/?key=you@example.com" }}
-            AccountSchema={MyAppAccount}
-        >
-            {children}
-        </JazzProvider>
-    );
+  return (
+    <JazzProvider
+      sync={{ peer: "wss://cloud.jazz.tools/?key=you@example.com" }}
+      AccountSchema={MyAppAccount}
+    >
+      {children}
+    </JazzProvider>
+  );
 }
 
 // Register the Account schema so `useAccount` returns our custom `MyAppAccount`
 declare module "jazz-expo" {
-    interface Register {
-        Account: MyAppAccount;
-    }
+  interface Register {
+    Account: MyAppAccount;
+  }
 }
 ```
 </CodeGroup>
@@ -169,7 +190,12 @@ You can customize the storage options in the `JazzProvider`:
 
 <CodeGroup>
 ```tsx
-import { JazzProvider, ExpoSQLiteAdapter, ExpoSecureStoreAdapter } from "jazz-expo";
+// App.tsx
+import {
+  JazzProvider,
+  ExpoSQLiteAdapter,
+  ExpoSecureStoreAdapter,
+} from "jazz-expo";
 
 // Default configuration - no parameters needed
 <JazzProvider
@@ -201,6 +227,7 @@ To define what database types your app uses, create `schema.ts` with a CoValue s
 
 <CodeGroup>
 ```tsx
+// schema.ts
 import { Account, AuthSession, createCoValueClass, z } from "jazz-expo";
 
 export class Chat extends createCoValueClass("chat", {
@@ -230,6 +257,7 @@ Now you can create a chat, add messages, invite collaborators, or sync data acro
 
 <CodeGroup>
 ```tsx
+// MyComponent.tsx
 import { useAccount, useCoValue } from "jazz-expo";
 import { Chat, MyAppAccount } from "./schema";
 
