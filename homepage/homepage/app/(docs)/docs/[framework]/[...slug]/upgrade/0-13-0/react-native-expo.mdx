@@ -18,8 +18,8 @@ This guide focuses on upgrading **Expo applications**. If you're using framework
 
 <CodeGroup>
 ```bash
-# Remove the old package
-npm uninstall jazz-react-native
+# Remove the old packages
+npm uninstall jazz-react-native jazz-react-native-clerk
 
 # Install the new Expo-specific packages
 npx expo install expo-sqlite expo-secure-store expo-file-system @react-native-community/netinfo
@@ -58,6 +58,26 @@ declare module "jazz-expo" { // *add*
 }
 ```
 </CodeGroup>
+
+## Clerk Authentication
+
+Clerk authentication has been moved inside the `jazz-expo` package. This is a breaking change that requires updating both your imports and providers.
+
+If you're using Clerk auth in your Expo application, you'll need to:
+
+<CodeGroup>
+```tsx
+// Old imports
+import { useClerkAuth } from "jazz-react-native-clerk";
+import { ClerkAuthProvider } from "jazz-react-native-clerk";
+
+// New imports
+import { useClerkAuth } from "jazz-expo/auth/clerk";
+import { ClerkAuthProvider } from "jazz-expo/auth/clerk";
+```
+</CodeGroup>
+
+Since Clerk only supports Expo applications, this consolidation makes sense and simplifies your dependency structure. You'll need to completely remove the `jazz-react-native-clerk` package from your dependencies and use the Clerk functionality that's now built into `jazz-expo`.
 
 ## Storage Adapter Changes
 
