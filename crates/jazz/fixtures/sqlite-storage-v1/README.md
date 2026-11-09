@@ -1,5 +1,23 @@
 # SQLite storage format 1 corpus
 
+## Pre-release watermark compatibility
+
+`client-watermarks-v1.sqlite.gz.base64` pins the pre-release watermark layout v1: `_jazz_watermarks(key BLOB PRIMARY KEY, through INTEGER NOT NULL) WITHOUT ROWID`. Its decoded SQLite SHA-256 is `a1301313c87fe4c597db630eed4e64d1800f6a0b7a575179ff73cee024e129bc`. It was made from the immutable synthetic client corpus below by dropping only `context` with SQLite `ALTER TABLE`; all application rows, history and pending uploads remain unchanged. It models main-tracking SQLite clients predating alpha.60, not the older Groove stores.
+
+Watermark layout v2 adds nullable `context BLOB`. On opening an admitted format-1 store with exactly the v1 columns, the engine adds that column and clears the old resume hints in one savepoint. Their permission context cannot be reconstructed, so queries must settle afresh. Application data and pending uploads are untouched. Existing v2 hints are retained on every subsequent open. The enclosing storage format remains 1: the nullable column is additive, old engines select and insert the named v1 columns, and current alpha.60 engines read the repaired file directly. Unsupported format stamps are still refused before this repair runs. Downgrading to an old engine does not gain the newer permission-context guarantees.
+
+`legacy_watermarks_upgrade_without_losing_pending_writes` verifies local rows, pending-upload preservation and settlement, new watermark writes, and a second reopen against this pinned fixture. The original alpha.60 corpus is not regenerated.
+
+## Pre-release outbox compatibility
+
+`client-outbox-v1.sqlite.gz.base64` is the unchanged synthetic client corpus from commit `f6b40d7b23`, with decoded SHA-256 `9c819e575adcf9cd04d31f49ac6c9f68aebadc23d6d451488cd794c602259273`. Outbox layout v1 stored a wire-encoded header in `_jazz_pending(tx, header)` and wire-encoded operations/reads in `_jazz_pending_items`. Alpha.60's outbox layout v2 uses named columns and typed child tables. The old retry store likewise stored wire-encoded `_jazz_rejected_ops(tx, n, op)` instead of typed operation columns.
+
+Opening upgrades only empty retired outboxes/retry stores: it verifies all related tables are empty, removes their old tables and cleanup trigger, and lets normal opening create the current layout. This and the watermark repair share a savepoint. Rows, history and settled transaction identities remain intact. Nonempty retired encodings are deliberately not decoded as current wire messages: admission returns `UnsupportedStorageCodecs` without changing the file and instructs the caller to sync or resolve those writes using the previous build first. The error does not suggest deleting user data. This compatibility path is for development SQLite caches, not arbitrary earlier format-1 variants. Downgrading after outbox conversion is unsupported.
+
+The regression receipts verify byte-preserving refusal of the pinned old pending-write corpus, and new-write settlement after upgrading an empty old outbox with the old cleanup trigger. Current-format pending writes continue to use the existing preservation and reconnect receipts.
+
+## Released corpus
+
 What an alpha.60 user has on disk: SQLite files written by Jazz storage
 format 1 (`jazz::format::STORAGE_FORMAT`), gzip-compressed and base64-encoded.
 Once alpha.60 ships they are immutable: a change that a format-1 file would

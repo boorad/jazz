@@ -981,6 +981,322 @@ fn pinned_sqlite_corpus_reopens_and_accepts_current_writes() {
     );
 }
 
+/// Alice upgrades a replica with watermark-v1 resume hints and offline writes.
+/// Opening preserves her rows and uploads; reconnecting settles writes, and
+/// the new context-aware watermark layout survives a second open.
+#[test]
+fn legacy_watermarks_upgrade_without_losing_pending_writes() {
+    let dir = scratch("watermarks-v1");
+    let server_path = install(SERVER_FILE, SERVER_SHA256, &dir);
+    let client_path = install(
+        "sqlite-storage-v1/client-watermarks-v1.sqlite.gz.base64",
+        "a1301313c87fe4c597db630eed4e64d1800f6a0b7a575179ff73cee024e129bc",
+        &dir,
+    );
+    let pending = pending_items(&client_path);
+    assert!(!pending.is_empty());
+    {
+        let client = open_client(&client_path);
+        assert_eq!(pending_items(&client_path), pending);
+        assert_eq!(
+            rows(&client, Query::from("projects"), local()).unwrap(),
+            expected_projects(true)
+        );
+        // SQL is necessary here: public reads cannot distinguish an absent
+        // resume hint from a stale hint silently ignored by the engine.
+        let conn = rusqlite::Connection::open(&client_path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT count(context) FROM _jazz_watermarks", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM _jazz_watermarks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "context-free hints must not resume a read");
+        drop(conn);
+        let server = open_server(&server_path).unwrap();
+        let (client_side, server_side) = duplex();
+        let _upstream = block_on(client.connect_upstream(client_side));
+        server.accept_subscriber(server_side, user(3)).unwrap();
+        let query = client.prepare_query(&Query::from("projects")).unwrap();
+        let _stream = block_on(client.subscribe(&query, ReadOpts::default())).unwrap();
+        let documents = client.prepare_query(&Query::from("documents")).unwrap();
+        let _documents = block_on(client.subscribe(&documents, ReadOpts::default())).unwrap();
+        drive(
+            &[&client, &server, &client],
+            client.wait_for_pending_writes(DurabilityTier::Global),
+        )
+        .unwrap();
+        assert_server_corpus(&server, true);
+        pump(&[&client, &server, &client]);
+        let remote = drive(
+            &[&client, &server, &client],
+            client.all(&query, ReadOpts::for_read_tier(ReadTier::Remote)),
+        )
+        .unwrap();
+        assert_eq!(remote.len(), expected_projects(true).len());
+    }
+    let watermark_count = || {
+        rusqlite::Connection::open(&client_path)
+            .unwrap()
+            .query_row("SELECT count(*) FROM _jazz_watermarks", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    // This corpus can legitimately invalidate hints when its old branch
+    // membership is evicted. Seed a v2 marker directly to isolate the storage
+    // contract: a second admission must neither reject nor erase it.
+    rusqlite::Connection::open(&client_path)
+        .unwrap()
+        .execute(
+            "INSERT OR REPLACE INTO _jazz_watermarks (key, through, context) VALUES (?1, ?2, ?3)",
+            rusqlite::params![[0x77u8; 32].as_slice(), 1i64, [0x88u8; 32].as_slice()],
+        )
+        .unwrap();
+    let count = watermark_count();
+    let client = open_client(&client_path);
+    assert_eq!(watermark_count(), count, "reopening v2 must retain hints");
+    assert_eq!(
+        rows(&client, Query::from("projects"), local()).unwrap(),
+        expected_projects(true)
+    );
+}
+
+/// Alice's cache remains in layout v1 if invalidating its old hints fails.
+/// A SQL trigger injects the storage failure; public APIs cannot simulate a
+/// failure between these two internal migration statements.
+#[test]
+fn legacy_watermark_upgrade_rolls_back_on_failure() {
+    let dir = scratch("watermarks-v1-rollback");
+    let path = install(
+        "sqlite-storage-v1/client-watermarks-v1.sqlite.gz.base64",
+        "a1301313c87fe4c597db630eed4e64d1800f6a0b7a575179ff73cee024e129bc",
+        &dir,
+    );
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TRIGGER fail_watermark_upgrade BEFORE DELETE ON _jazz_watermarks \
+         BEGIN SELECT RAISE(ABORT, 'injected watermark failure'); END;",
+    )
+    .unwrap();
+    let opened = block_on(Db::open_at(
+        config(v1(), CLIENT_NODE, user(3)),
+        &path,
+        FileOptions::default(),
+    ));
+    assert!(opened.is_err());
+    let columns: Vec<String> = conn
+        .prepare("PRAGMA table_info(_jazz_watermarks)")
+        .unwrap()
+        .query_map([], |row| row.get(1))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(columns, ["key", "through"]);
+    let count: i64 = conn
+        .query_row("SELECT count(*) FROM _jazz_watermarks", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 4, "all original resume hints survive rollback");
+    conn.execute_batch("DROP TRIGGER fail_watermark_upgrade;")
+        .unwrap();
+    drop(conn);
+    let client = open_client(&path);
+    assert_eq!(
+        rows(&client, Query::from("projects"), local()).unwrap(),
+        expected_projects(true)
+    );
+}
+
+/// Alice's offline writes in the retired outbox encoding are refused before
+/// any migration writes, leaving the pinned old store usable by her old build.
+#[test]
+fn legacy_nonempty_outbox_is_refused_unchanged() {
+    let dir = scratch("outbox-v1-refusal");
+    let path = install(
+        "sqlite-storage-v1/client-outbox-v1.sqlite.gz.base64",
+        "9c819e575adcf9cd04d31f49ac6c9f68aebadc23d6d451488cd794c602259273",
+        &dir,
+    );
+    let before = std::fs::read(&path).unwrap();
+    let result = block_on(Db::open_at(
+        config(v1(), CLIENT_NODE, user(3)),
+        &path,
+        FileOptions::default(),
+    ));
+    let error = match result {
+        Ok(_) => panic!("old pending writes must not be discarded"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, ErrorCode::UnsupportedStorageCodecs);
+    assert!(error.message.contains("previous build"));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+/// Alice upgrades a fully synced old cache and can create and settle another
+/// write. A failed watermark upgrade must restore the old outbox and trigger;
+/// after retry, the new trigger must remove all current outbox parts.
+#[test]
+fn legacy_empty_outbox_upgrades_and_accepts_new_writes() {
+    let dir = scratch("outbox-v1-empty");
+    let server_path = install(SERVER_FILE, SERVER_SHA256, &dir);
+    let client_path = install(CLIENT_FILE, CLIENT_SHA256, &dir);
+    let server = open_server(&server_path).unwrap();
+    {
+        let client = open_client(&client_path);
+        let (client_side, server_side) = duplex();
+        let _upstream = block_on(client.connect_upstream(client_side));
+        server.accept_subscriber(server_side, user(3)).unwrap();
+        drive(
+            &[&client, &server, &client],
+            client.wait_for_pending_writes(DurabilityTier::Global),
+        )
+        .unwrap();
+    }
+    // Reproduce the retired empty outbox using SQL: the current public API
+    // cannot create an old engine's table layout. Rows and history stay intact.
+    let conn = rusqlite::Connection::open(&client_path).unwrap();
+    let count: i64 = conn
+        .query_row("SELECT count(*) FROM _jazz_pending", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
+    conn.execute_batch(
+        "DROP TRIGGER _jazz_pending_forget; DROP TABLE _jazz_pending; \
+         CREATE TABLE _jazz_pending (tx INTEGER PRIMARY KEY, header BLOB NOT NULL); \
+         CREATE TABLE _jazz_pending_items (tx INTEGER NOT NULL, part INTEGER NOT NULL, n INTEGER NOT NULL, item BLOB NOT NULL, PRIMARY KEY (tx, part, n)); \
+         CREATE TRIGGER _jazz_pending_forget AFTER DELETE ON _jazz_pending BEGIN \
+         DELETE FROM _jazz_pending_items WHERE tx = OLD.tx; DELETE FROM _jazz_pending_rows WHERE tx = OLD.tx; END; \
+         ALTER TABLE _jazz_watermarks DROP COLUMN context; \
+         INSERT OR REPLACE INTO _jazz_watermarks (key, through) VALUES (zeroblob(32), 1); \
+         CREATE TRIGGER fail_combined_upgrade BEFORE DELETE ON _jazz_watermarks BEGIN SELECT RAISE(ABORT, 'injected failure'); END;"
+    ).unwrap();
+    let old_trigger: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='_jazz_pending_forget'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        block_on(Db::open_at(
+            config(v1(), CLIENT_NODE, user(3)),
+            &client_path,
+            FileOptions::default()
+        ))
+        .is_err()
+    );
+    let restored_trigger: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='_jazz_pending_forget'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(restored_trigger, old_trigger);
+    conn.prepare("SELECT header FROM _jazz_pending").unwrap();
+    conn.prepare("SELECT item FROM _jazz_pending_items")
+        .unwrap();
+    assert!(
+        conn.prepare("SELECT context FROM _jazz_watermarks")
+            .is_err()
+    );
+    conn.execute_batch("DROP TRIGGER fail_combined_upgrade;")
+        .unwrap();
+    drop(conn);
+    let client = open_client(&client_path);
+    assert_eq!(
+        rows(&client, Query::from("projects"), local()).unwrap(),
+        expected_projects(true)
+    );
+    let (client_side, server_side) = duplex();
+    let _upstream = block_on(client.connect_upstream(client_side));
+    server.accept_subscriber(server_side, user(3)).unwrap();
+    insert_as(
+        &client,
+        "projects",
+        project(6),
+        user(3),
+        22,
+        &[("name", string("New after upgrade"))],
+    );
+    drive(
+        &[&client, &server, &client],
+        client.wait_for_pending_writes(DurabilityTier::Global),
+    )
+    .unwrap();
+    assert_eq!(
+        rows(
+            &server,
+            Query::from("projects").filter(eq(col("id"), lit(uuid(project(6))))),
+            ReadOpts::default()
+        )
+        .unwrap(),
+        vec![expect(project(6), &[("name", string("New after upgrade"))])]
+    );
+    assert!(pending_items(&client_path).is_empty());
+}
+
+/// Alice's empty legacy retry store upgrades without altering her current
+/// pending uploads; either occupied retry table is refused byte-for-byte.
+/// SQL constructs the retired layout because current APIs only write v2.
+#[test]
+fn legacy_retry_store_upgrade_preserves_writes() {
+    for occupied in ["none", "header", "op"] {
+        let dir = scratch(&format!("retry-v1-{occupied}"));
+        let path = install(CLIENT_FILE, CLIENT_SHA256, &dir);
+        let pending = pending_items(&path);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE _jazz_rejected (tx INTEGER PRIMARY KEY, error BLOB NOT NULL, serializable INTEGER NOT NULL); \
+             CREATE TABLE _jazz_rejected_ops (tx INTEGER NOT NULL, n INTEGER NOT NULL, op BLOB NOT NULL, PRIMARY KEY (tx, n));"
+        ).unwrap();
+        match occupied {
+            "header" => conn
+                .execute_batch("INSERT INTO _jazz_rejected VALUES (1, X'01', 0);")
+                .unwrap(),
+            "op" => conn
+                .execute_batch("INSERT INTO _jazz_rejected_ops VALUES (1, 0, X'01');")
+                .unwrap(),
+            _ => {}
+        }
+        drop(conn);
+        let before = std::fs::read(&path).unwrap();
+        let result = block_on(Db::open_at(
+            config(v1(), CLIENT_NODE, user(3)),
+            &path,
+            FileOptions::default(),
+        ));
+        if occupied == "none" {
+            let client = result.unwrap();
+            assert_eq!(pending_items(&path), pending);
+            assert_eq!(
+                rows(&client, Query::from("projects"), local()).unwrap(),
+                expected_projects(true)
+            );
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            let legacy: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name='_jazz_rejected_ops'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(legacy, 0, "current retry tables are created lazily");
+        } else {
+            let error = match result {
+                Ok(_) => panic!("rejected write was discarded"),
+                Err(error) => error,
+            };
+            assert_eq!(error.code, ErrorCode::UnsupportedStorageCodecs);
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
+    }
+}
+
 /// The server stores `documents.status` as tags in the order the variants
 /// were declared, and the client mirrored the same tags.
 #[test]

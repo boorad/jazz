@@ -16,6 +16,13 @@ cd "$root"
 # value and renamed column, resends its uploads, accepts current writes, and
 # reopens again.
 dev/t --test integration --exact storage_corpus::pinned_sqlite_corpus_reopens_and_accepts_current_writes
+# Pre-release SQLite clients keep their rows and pending uploads while their
+# context-free watermark layout upgrades atomically to the released layout.
+dev/t --test integration --exact storage_corpus::legacy_watermarks_upgrade_without_losing_pending_writes
+dev/t --test integration --exact storage_corpus::legacy_watermark_upgrade_rolls_back_on_failure
+dev/t --test integration --exact storage_corpus::legacy_empty_outbox_upgrades_and_accepts_new_writes
+dev/t --test integration --exact storage_corpus::legacy_nonempty_outbox_is_refused_unchanged
+dev/t --test integration --exact storage_corpus::legacy_retry_store_upgrade_preserves_writes
 # The pinned server data dir (a catalogue-driven server's jazz.sqlite: rows,
 # catalogue tables, and the account journal host table)
 # serves its deployments, accounts and rows, accepts current writes, and

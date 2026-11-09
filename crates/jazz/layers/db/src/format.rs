@@ -26,7 +26,7 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::options::{Error, ErrorCode};
-use crate::values::storage;
+use crate::values::{in_savepoint, storage};
 
 /// The storage format this build writes and reads.
 pub const STORAGE_FORMAT: i64 = 1;
@@ -45,8 +45,8 @@ pub(crate) fn unsupported(detail: impl std::fmt::Display) -> Error {
 }
 
 /// Admit the file `conn` opened: stamp a new one, accept one in
-/// [`STORAGE_FORMAT`], refuse anything else. Reads only, unless the file is
-/// new.
+/// [`STORAGE_FORMAT`], refuse anything else. Accepted pre-release format-1
+/// files also receive the known watermark and empty-outbox layout repairs.
 pub(crate) fn admit(conn: &Connection) -> Result<(), Error> {
     // A damaged header fails here (`file is not a database`), as a storage
     // error, before any write.
@@ -85,7 +85,7 @@ pub(crate) fn admit(conn: &Connection) -> Result<(), Error> {
         })
         .map_err(storage)?;
     match versions.as_slice() {
-        [rusqlite::types::Value::Integer(STORAGE_FORMAT)] => Ok(()),
+        [rusqlite::types::Value::Integer(STORAGE_FORMAT)] => upgrade_development_layouts(conn),
         [rusqlite::types::Value::Integer(version)] => Err(unsupported(format!(
             "this store was written in Jazz SQLite storage format {version}"
         ))),
@@ -94,6 +94,89 @@ pub(crate) fn admit(conn: &Connection) -> Result<(), Error> {
             format!("corrupt storage format stamp: {STAMP_TABLE} holds {other:?}"),
         )),
     }
+}
+
+/// Pre-release format 1 encoded pending uploads as wire messages. Only an
+/// empty outbox can be upgraded without interpreting those retired codecs.
+/// Refuse nonempty old outboxes before any write, so the old build can sync
+/// them first. Never discard a pending or rejected user write.
+fn upgrade_development_layouts(conn: &Connection) -> Result<(), Error> {
+    let pending = table_columns(conn, "_jazz_pending")? == ["tx", "header"];
+    let rejected = table_columns(conn, "_jazz_rejected_ops")? == ["tx", "n", "op"];
+    if !pending && !rejected {
+        return upgrade_watermarks(conn);
+    }
+    in_savepoint(conn, "development_layouts", || {
+        let mut retired = Vec::new();
+        if pending {
+            retired.extend([
+                "_jazz_pending",
+                "_jazz_pending_items",
+                "_jazz_pending_rows",
+                "_jazz_pending_ops",
+                "_jazz_pending_cells",
+                "_jazz_pending_deltas",
+                "_jazz_pending_reads",
+                "_jazz_pending_read_rows",
+            ]);
+        }
+        if rejected {
+            retired.extend(["_jazz_rejected", "_jazz_rejected_ops"]);
+        }
+        for table in &retired {
+            if table_columns(conn, table)?.is_empty() {
+                continue;
+            }
+            let occupied: bool = conn
+                .query_row(
+                    &format!("SELECT EXISTS(SELECT 1 FROM {table} LIMIT 1)"),
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+            if occupied {
+                return Err(Error::new(
+                    ErrorCode::UnsupportedStorageCodecs,
+                    "this pre-release SQLite store has pending or rejected writes in a retired encoding; reopen it with the previous build and sync or resolve those writes before upgrading. The store has not been changed",
+                ));
+            }
+        }
+        if pending {
+            conn.execute_batch("DROP TRIGGER IF EXISTS _jazz_pending_forget;")
+                .map_err(storage)?;
+        }
+        for table in retired {
+            conn.execute_batch(&format!("DROP TABLE IF EXISTS {table};"))
+                .map_err(storage)?;
+        }
+        // Normal opening recreates the current pending tables and trigger.
+        upgrade_watermarks(conn)
+    })
+}
+
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>, Error> {
+    conn.prepare(&format!("PRAGMA table_info({table})"))
+        .and_then(|mut statement| statement.query_map([], |row| row.get(1))?.collect())
+        .map_err(storage)
+}
+
+/// Watermark layout v1 was `(key, through)`; v2 adds nullable `context`.
+/// Old engines can still read v2, so the enclosing storage format stays 1.
+/// A v1 marker has no trustworthy read context: discard only these resume
+/// hints, never cached rows, history or pending writes. Add and invalidate
+/// atomically so an interrupted upgrade cannot expose context-free hints.
+fn upgrade_watermarks(conn: &Connection) -> Result<(), Error> {
+    let columns = table_columns(conn, "_jazz_watermarks")?;
+    if columns == ["key", "through"] {
+        in_savepoint(conn, "watermarks_v2", || {
+            conn.execute_batch(
+                "ALTER TABLE _jazz_watermarks ADD COLUMN context BLOB; \
+                 DELETE FROM _jazz_watermarks;",
+            )
+            .map_err(storage)
+        })?;
+    }
+    Ok(())
 }
 
 /// Whether `dir` is a RocksDB directory: the Groove engine's native store.
