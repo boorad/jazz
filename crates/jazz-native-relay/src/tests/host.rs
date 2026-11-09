@@ -411,6 +411,68 @@ fn process_reopen_rehydrates_the_persisted_row() {
     second.wait_for_row(foreground, (row, "survives restart"));
 }
 
+/// Alice's large locally written value reaches a sibling foreground and a
+/// new foreground after process restart. This host-level test is necessary
+/// because the native relay's worker and foreground command queues are not
+/// exercised by the Db binding-only persistence tests.
+#[test]
+fn process_reopen_rehydrates_a_large_value_subscription() {
+    fn await_title(fixture: &Fixture, foreground: u64, expected: &str) {
+        let ForegroundDbCommandResponse::Subscribed { subscription } = fixture.execute(
+            foreground,
+            ForegroundDbCommandRequest::Subscribe {
+                query: todos_query(),
+                options_json: "{}".into(),
+            },
+        ) else {
+            panic!("subscription opens")
+        };
+        for _ in 0..300 {
+            fixture.tick(foreground);
+            let ForegroundDbCommandResponse::SubscriptionEvents { events } = fixture.execute(
+                foreground,
+                ForegroundDbCommandRequest::DrainSubscription { subscription },
+            ) else {
+                panic!("subscription drains")
+            };
+            for event in events {
+                if let ForegroundSubscriptionEvent::Delta { delta, .. }
+                | ForegroundSubscriptionEvent::StructuredDelta { delta, .. } = event
+                {
+                    let (added, updated) = decode_subscription_delta_rows(&delta).unwrap();
+                    if added
+                        .into_iter()
+                        .chain(updated)
+                        .flat_map(|b| b.rows)
+                        .any(|r| r.cells.get("title") == Some(&Value::String(expected.to_owned())))
+                    {
+                        return;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("large value never reached the foreground subscription");
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("alice.sqlite");
+    let large = "large native body ".repeat(20_000);
+    {
+        let first = Fixture::new();
+        let capability = first.admit(&path, "alice", 0x42);
+        let writer = first.open(&capability);
+        first.insert_todo(writer, [0x42; 16], &large);
+        let reader = first.open(&capability);
+        await_title(&first, reader, &large);
+        first.close(writer);
+        first.close(reader);
+    }
+    let second = Fixture::new();
+    let capability = second.admit(&path, "alice", 0x42);
+    let reader = second.open(&capability);
+    await_title(&second, reader, &large);
+}
+
 #[test]
 fn scopes_are_isolated_and_revocation_retires_only_its_foregrounds() {
     let directory = tempfile::tempdir().unwrap();

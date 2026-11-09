@@ -302,6 +302,77 @@ fn a_replica_pulls_the_chunks_its_results_need() {
     assert!(saw, "the opening carried the value");
 }
 
+/// Alice can fetch an unchanged large note after Bob grants access by adding
+/// its policy dependency: note -> grant -> subscribe -> complete body.
+#[test]
+fn a_later_policy_grant_allows_current_large_value_chunks() {
+    let server = open(0, AuthorSubject::SYSTEM);
+    let alice = open(1, user(1));
+    let body = text(71, LARGE);
+    insert(
+        &server,
+        "notes",
+        1,
+        vec![("text", Value::String(body.clone()))],
+    );
+    // Notes become readable only once a doc exists. The note itself is not
+    // rewritten when access is granted.
+    insert(
+        &server,
+        "docs",
+        2,
+        vec![
+            ("body", Value::String("grant".into())),
+            ("blob", Value::Bytes(Vec::new())),
+        ],
+    );
+    connect(&server, &alice, user(1));
+    let mut stream = subscribe(&alice, Query::from("notes"));
+    pump(&server, &[&alice]);
+    assert_eq!(
+        local_cell(&alice, "notes", 1, "text").unwrap(),
+        Some(Value::String(body.clone()))
+    );
+    let mut saw = false;
+    while let Some(event) = stream.try_next_event() {
+        saw |= format!("{event:?}").contains(&body[..64]);
+    }
+    assert!(saw, "the subscription publishes the authorized body");
+}
+
+/// Alice's foreground fetches a note through her relay after Bob creates the
+/// grant later than the note: authority -> relay -> foreground.
+#[test]
+fn a_later_policy_grant_allows_large_values_through_a_relay() {
+    let core = open(0, AuthorSubject::SYSTEM);
+    let relay = open(5, user(5));
+    let tab = open(6, user(5));
+    let body = text(72, LARGE);
+    insert(
+        &core,
+        "notes",
+        1,
+        vec![("text", Value::String(body.clone()))],
+    );
+    insert(
+        &core,
+        "docs",
+        2,
+        vec![
+            ("body", Value::String("grant".into())),
+            ("blob", Value::Bytes(Vec::new())),
+        ],
+    );
+    connect(&core, &relay, user(5));
+    connect(&relay, &tab, user(5));
+    let _stream = subscribe(&tab, Query::from("notes"));
+    pump_chain(&core, &relay, &tab);
+    assert_eq!(
+        local_cell(&tab, "notes", 1, "text").unwrap(),
+        Some(Value::String(body))
+    );
+}
+
 #[test]
 fn a_range_read_on_a_replica_fetches_only_what_it_covers() {
     let server = open(0, AuthorSubject::SYSTEM);

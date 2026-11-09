@@ -1668,12 +1668,12 @@ fn a_tabs_local_wait_the_worker_refuses_claims_the_refusal() {
 /// The React Native relay's shape: a non-durable foreground served by the
 /// relay's own durable store, which syncs with the server; every binding's
 /// host ticks only when asked, and is listening before anything opens.
-fn device_chain_subscribes_to_a_large_value(file: Option<&std::path::Path>) {
+fn device_chain_subscribes_to_a_large_value(file: Option<&std::path::Path>, preload: Option<bool>) {
     let server = authority();
     let large = "w".repeat(300 * 1024);
     server.insert("notes", &title(&large), &none()).unwrap();
     let node = 0xd8;
-    let relay = match file {
+    let open_relay = || match file {
         Some(path) => {
             let db = block_on(Db::open_at(
                 DbConfig::new(schema(), identity(node)),
@@ -1685,6 +1685,30 @@ fn device_chain_subscribes_to_a_large_value(file: Option<&std::path::Path>) {
         }
         None => open(node),
     };
+    if let Some(full) = preload {
+        let warm = open_relay();
+        warm.set_remote_link_hint("live").unwrap();
+        let up = warm.connect_upstream();
+        let down = server
+            .accept_subscriber(warm.author(), Default::default())
+            .unwrap();
+        let query = if full {
+            Query::from("notes").select(["title"])
+        } else {
+            Query::from("notes").select(["id"])
+        };
+        let read = warm
+            .all(
+                postcard::to_allocvec(&query).unwrap(),
+                &json!({"tier":"remote"}),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        drive(&[(&up, &down)], read).unwrap();
+    }
+    let relay = open_relay();
     let tab = open(0xd9);
     let flags: Vec<(&Binding, Rc<Cell<bool>>)> = [&relay, &tab, &server]
         .into_iter()
@@ -1737,11 +1761,27 @@ fn device_chain_subscribes_to_a_large_value(file: Option<&std::path::Path>) {
 
 #[test]
 fn a_foreground_over_a_memory_relay_subscribes_to_a_large_value_on_demand() {
-    device_chain_subscribes_to_a_large_value(None);
+    device_chain_subscribes_to_a_large_value(None, None);
 }
 
 #[test]
 fn a_foreground_over_a_file_relay_subscribes_to_a_large_value_on_demand() {
     let dir = tempfile::tempdir().unwrap();
-    device_chain_subscribes_to_a_large_value(Some(&dir.path().join("relay.sqlite")));
+    device_chain_subscribes_to_a_large_value(Some(&dir.path().join("relay.sqlite")), None);
+}
+
+/// Alice cold-starts a foreground over a replica whose row, but not its large
+/// body, was read before closing. Chunk demand must still reach the server.
+#[test]
+fn a_foreground_reads_large_values_after_a_shallow_relay_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    device_chain_subscribes_to_a_large_value(Some(&dir.path().join("relay.sqlite")), Some(false));
+}
+
+/// Alice cold-starts a foreground after its durable relay previously read the
+/// complete large body. Reopening must retain and serve that body's chunks.
+#[test]
+fn a_foreground_reads_large_values_after_a_full_relay_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    device_chain_subscribes_to_a_large_value(Some(&dir.path().join("relay.sqlite")), Some(true));
 }

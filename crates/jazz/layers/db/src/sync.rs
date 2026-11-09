@@ -13682,9 +13682,10 @@ fn readable_version(
     )
 }
 
-/// Whether `identity` may read the version of `row` at `seq` and, still,
-/// the row as it stands: losing read access takes effect at once for the
-/// content of every earlier version too (SPEC 19.9, INV-RLS-13).
+/// Whether `identity` may read the version of `row` at `at` and, still,
+/// the row as it stands. The current accepted version uses current policy;
+/// older versions also require historical permission. Losing read access
+/// takes effect at once for every version (SPEC 19.9, INV-RLS-13).
 fn still_readable_version(
     inner: &Inner,
     policies: &Schema,
@@ -13694,10 +13695,23 @@ fn still_readable_version(
     at: Pos,
     identity: Option<AuthorSubject>,
 ) -> Result<bool, Error> {
-    Ok(
-        readable_version(inner, policies, table, row, key, at, identity)?
-            && readable(inner, policies, table, row, key, identity)?,
-    )
+    if !readable(inner, policies, table, row, key, identity)? {
+        return Ok(false);
+    }
+    // Current reads evaluate related policy rows as they stand now. A grant
+    // may be newer than the content it authorizes; cutting those rows at the
+    // content's creation would deny chunks for an otherwise readable result.
+    // Only the exact current accepted version uses that authorization. Older
+    // versions still require their historical policy, and pending positions
+    // cannot identify a version without its writer.
+    if at.accepted()
+        && inner
+            .current_image(table, row, key)?
+            .is_some_and(|image| image.at == at && !image.deleted)
+    {
+        return Ok(true);
+    }
+    readable_version(inner, policies, table, row, key, at, identity)
 }
 
 /// Whether `identity` may read a row of stored table `table`, by

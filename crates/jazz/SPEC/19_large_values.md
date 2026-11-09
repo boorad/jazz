@@ -456,7 +456,11 @@ that the receiver holds, named by its seq.
 - **Reads.** A reader receives a version's edits only as part of that
   version, and nodes only beneath roots its readable versions reach. A reader
   allowed to see one version but not a later one never receives the later
-  version's edits. Losing read access takes effect at once.
+  version's edits. Losing read access takes effect at once. The current accepted
+  row version uses current policy dependencies, just as a current SELECT does:
+  granting membership after the content was written permits reading its chunks.
+  Older versions additionally require permission at their historical cut; a
+  new grant does not disclose an inaccessible superseded version.
 - **No existence oracle.** The server never tells a client it already holds a
   node the client cannot read: an unreadable pull is answered as absent, and
   uploads are never skipped on the server's word. Deduplication is silent.
