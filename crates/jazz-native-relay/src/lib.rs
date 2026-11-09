@@ -1930,13 +1930,6 @@ impl NativeRelayHost {
             migrations,
             identity: request.identity,
         };
-        let versions = |migrations: &jazz::db::Migrations| {
-            migrations
-                .schemas
-                .iter()
-                .map(|schema| schema.version_id())
-                .collect::<Vec<_>>()
-        };
         // A scope is immutable once trusted code has admitted it. Reject a
         // conflicting second configuration before JavaScript can receive a
         // capability, even if no relay alias has been opened yet.
@@ -1944,7 +1937,8 @@ impl NativeRelayHost {
             admitted.config.scope == config.scope
                 && (admitted.config.sqlite_path != config.sqlite_path
                     || admitted.config.schema.version_id() != config.schema.version_id()
-                    || versions(&admitted.config.migrations) != versions(&config.migrations)
+                    || MigrationIdentity::of(&admitted.config.migrations)
+                        != MigrationIdentity::of(&config.migrations)
                     || admitted.config.identity != config.identity
                     || admitted.claims != request.claims)
         }) {

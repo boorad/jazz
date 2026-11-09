@@ -139,6 +139,33 @@ pub struct RelayOpenConfig {
     pub identity: DbIdentity,
 }
 
+/// The complete history that determines a scope's physical column layout.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MigrationIdentity {
+    schemas: Vec<jazz::ids::SchemaVersionId>,
+    lenses: Vec<jazz::ids::MigrationLensId>,
+}
+
+impl MigrationIdentity {
+    pub(crate) fn of(migrations: &Migrations) -> Self {
+        let mut schemas: Vec<_> = migrations
+            .schemas
+            .iter()
+            .map(|schema| schema.version_id())
+            .collect();
+        let mut lenses: Vec<_> = migrations
+            .lenses
+            .iter()
+            .map(|lens| lens.content_id())
+            .collect();
+        schemas.sort();
+        schemas.dedup();
+        lenses.sort();
+        lenses.dedup();
+        Self { schemas, lenses }
+    }
+}
+
 impl RelayOpenConfig {
     fn validate(&self) -> Result<(), RelayError> {
         ensure_native_relay_abi_compatible(self.supported_abi)?;
@@ -261,6 +288,7 @@ struct RelayInner {
     alive: Arc<AtomicBool>,
     sqlite_path: PathBuf,
     schema_version: jazz::ids::SchemaVersionId,
+    migration_identity: MigrationIdentity,
     identity: DbIdentity,
 }
 
@@ -311,6 +339,7 @@ impl NativeRelay {
         config.validate()?;
         let sqlite_path = config.sqlite_path.clone();
         let schema_version = config.schema.version_id();
+        let migration_identity = MigrationIdentity::of(&config.migrations);
         let identity = config.identity;
         let alive = Arc::new(AtomicBool::new(true));
         let (commands, receiver) =
@@ -344,6 +373,7 @@ impl NativeRelay {
                 alive,
                 sqlite_path,
                 schema_version,
+                migration_identity,
                 identity,
             }),
         })
@@ -1835,6 +1865,7 @@ impl NativeRelayRegistry {
         if let Some(existing) = relays.get(&config.scope) {
             if existing.inner.sqlite_path != config.sqlite_path
                 || existing.inner.schema_version != config.schema.version_id()
+                || existing.inner.migration_identity != MigrationIdentity::of(&config.migrations)
                 || existing.inner.identity != config.identity
             {
                 return Err(RelayError::ScopeConfigurationMismatch);

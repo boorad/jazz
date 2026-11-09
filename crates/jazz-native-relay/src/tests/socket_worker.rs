@@ -591,8 +591,44 @@ fn an_attached_schema_stores_columns_where_its_shipped_migrations_put_them() {
         let admitted = host
             .attach_canonical_schema(pending, &payload.to_string())
             .unwrap();
-        host.open_foreground(admitted, DIRECT_FOREGROUND_RUNTIME_TOKEN)
-            .unwrap();
+        if payload.get("migrations").is_some() {
+            let mut conflicting = payload.clone();
+            conflicting["migrations"]["migrations"] = serde_json::json!([]);
+            // Same schemas but a missing rename lens must not share an admission,
+            // both before the first relay opens and after it owns the store.
+            for opened in [false, true] {
+                if opened {
+                    host.open_foreground(admitted, DIRECT_FOREGROUND_RUNTIME_TOKEN)
+                        .unwrap();
+                }
+                let next = host
+                    .begin_private_session(PrivateSessionSetupJson {
+                        server_url: "https://edge.example".to_owned(),
+                        app_id: app_id.to_owned(),
+                        jwt: bearer(1),
+                        storage_root: root.display().to_string(),
+                    })
+                    .unwrap();
+                assert!(matches!(
+                    host.attach_canonical_schema(next, &conflicting.to_string()),
+                    Err(JazzNativeRelayStatus::LifecycleFailure)
+                ));
+            }
+            let original = host.admitted_scopes[&admitted].config.clone();
+            // The public registry must enforce the same history identity too.
+            let mut equivalent = original.clone();
+            equivalent.migrations.schemas.reverse();
+            host.registry.open_admitted(equivalent).unwrap();
+            let mut different = original;
+            different.migrations.lenses.clear();
+            assert!(matches!(
+                host.registry.open_admitted(different),
+                Err(RelayError::ScopeConfigurationMismatch)
+            ));
+        } else {
+            host.open_foreground(admitted, DIRECT_FOREGROUND_RUNTIME_TOKEN)
+                .unwrap();
+        }
         stored_column(&host.admitted_scopes[&admitted].config.sqlite_path)
     };
     let tables = serde_json::to_value(head_schema.public_schema()).unwrap();
