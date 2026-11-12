@@ -377,41 +377,61 @@ describe("createPolicyTestApp", () => {
     expect(calls).toEqual(["local", "global"]);
   });
 
-  it("creates a test app from an app definition and compiled permissions", async () => {
-    const policyTestApp = await createPolicyTestApp(testApp, testPermissions, expect);
+  it.each([true, false, undefined])(
+    "enforces real policy and shuts down with inMemory=%s",
+    async (inMemory) => {
+      const policyTestApp = await createPolicyTestApp(testApp, testPermissions, expect, {
+        inMemory,
+      });
+      const server = Reflect.get(policyTestApp, "server") as LocalJazzServerHandle;
+      expect(server.dataDir === "").toBe(inMemory === true);
 
-    try {
-      const seeded = await policyTestApp.seed((db) => {
-        return db.insert(testApp.todos, {
-          title: "Ship the direct app API",
-          done: false,
-          ownerId: "00000000-0000-4000-8000-000000000001",
+      try {
+        const seeded = await policyTestApp.seed((db) => {
+          return db.insert(testApp.todos, {
+            title: "Ship the direct app API",
+            done: false,
+            ownerId: "00000000-0000-4000-8000-000000000001",
+          });
         });
-      });
 
-      const alice = policyTestApp.as({
-        issuer: "https://policy-test.example",
-        user_id: "alice",
-        account_id: "00000000-0000-4000-8000-000000000001",
-        claims: {},
-        authMode: "external",
-      });
-      const bob = policyTestApp.as({
-        issuer: "https://policy-test.example",
-        user_id: "bob",
-        account_id: "00000000-0000-4000-8000-000000000002",
-        claims: {},
-        authMode: "external",
-      });
+        const alice = policyTestApp.as({
+          issuer: "https://policy-test.example",
+          user_id: "alice",
+          account_id: "00000000-0000-4000-8000-000000000001",
+          claims: {},
+          authMode: "external",
+        });
+        const bob = policyTestApp.as({
+          issuer: "https://policy-test.example",
+          user_id: "bob",
+          account_id: "00000000-0000-4000-8000-000000000002",
+          claims: {},
+          authMode: "external",
+        });
 
-      await expect(alice.all(testApp.todos.where({ id: seeded.id }))).resolves.toEqual([
-        expect.objectContaining({ id: seeded.id }),
-      ]);
-      await expect(bob.all(testApp.todos.where({ id: seeded.id }))).resolves.toEqual([]);
-    } finally {
-      await policyTestApp.shutdown();
-    }
-  }, 10_000);
+        await expect(alice.all(testApp.todos.where({ id: seeded.id }))).resolves.toEqual([
+          expect.objectContaining({ id: seeded.id }),
+        ]);
+        await expect(bob.all(testApp.todos.where({ id: seeded.id }))).resolves.toEqual([]);
+        await bob.expectDenied((db) =>
+          db.insert(testApp.todos, {
+            title: "Cannot impersonate Alice",
+            done: false,
+            ownerId: "00000000-0000-4000-8000-000000000001",
+          }),
+        );
+      } finally {
+        await policyTestApp.shutdown();
+      }
+      expect(await canBindPort(server.port)).toBe(true);
+      if (server.dataDir) {
+        const { access } = await import("node:fs/promises");
+        await expect(access(server.dataDir)).rejects.toThrow();
+      }
+    },
+    10_000,
+  );
 
   it("rejects a seed callback that returns the inserted row instead of the write", async () => {
     const policyTestApp = await createPolicyTestApp(testApp, testPermissions, expect);

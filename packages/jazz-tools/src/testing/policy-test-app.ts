@@ -13,6 +13,8 @@ import { startLocalJazzServer, type LocalJazzServerHandle } from "../dev/dev-ser
 
 type PolicyTestAppSchema = { wasmSchema: WasmSchema };
 export type PolicyTestAppOptions = {
+  /** Keep the serving authority in memory instead of a temporary SQLite directory. */
+  inMemory?: boolean;
   /** Override only the client credential; the local authority keeps its configured secret. */
   clientBackendSecret?: string | null;
 };
@@ -283,6 +285,7 @@ export async function createPolicyTestApp(
   const backendSecret = `backend-secret`;
   const adminSecret = `admin-secret`;
   const server = await startLocalJazzServer({
+    inMemory: options.inMemory,
     backendSecret,
     adminSecret,
   });
